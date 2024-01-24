@@ -38,8 +38,30 @@ class Configuracion:
         self.tiene_alarmas: bool = False
         self.puerto_arduino_reles: str = None
         self.puerto_arduino_alarmas: str = None
+        self.tiene_camara: bool = False
+        self.camara_valida: bool = False
+        self.camara: str = None
+        self.ancho_imagen: int = 640
+        self.alto_imagen: int = 480
+        self.numero_camara: int = 0
+
+        # Datos para el predictor
+        self.modelo = None
+        self.confianza_minima = 0.5
+        self.carpeta_imagenes = './imagenes'
+        self.guardar_imagenes = False
+        self.guardar_texto = False
+        self.prefijo_imagenes = ''
+
+        # Configuración de los EPPs para esta maquina
+        self.epps: list[int] = []
+
+        # Configuracion
         self.config = configparser.ConfigParser()
         self.config.read(self.ARCHIVO_CONFIGURACION)
+
+        # Elementos de protección personal configurado en esta maquina
+        self.epps: list[int] = []
 
         if self.config.has_section('conexion'):
             self.es_valido = True
@@ -70,6 +92,46 @@ class Configuracion:
                 self.leds['azul'] = int(self.config.getint('alarma', 'pin-azul'))
                 self.leds['zumbador'] = int(self.config.getint('alarma', 'pin-zumbador'))
 
+        # Trabajo con el modelo de YOLO
+        if self.config.has_section('detector'):
+            self.modelo = self.config.get('detector', 'modelo')
+            if self.config.has_option('detector', 'confianza-minima'):
+                self.confianza_minima = self.config.getfloat('detector', 'confianza-minima')
+            if self.config.has_option('detector', 'carpeta-imagenes'):
+                self.carpeta_imagenes = self.config.get('detector', 'carpeta-imagenes')
+            if self.config.has_option('detector', 'guardar-imagenes'):
+                self.guardar_imagenes = self.config.get('detector', 'guardar-imagenes').upper() == 'SI'
+            if self.config.has_option('detector', 'guardar-texto'):
+                self.guardar_texto = self.config.get('detector', 'guardar-texto').upper() == 'SI'
+            if self.config.has_option('detector', 'prefijo-imagenes'):
+                self.prefijo_imagenes = self.config.get('detector', 'prefijo-imagenes')
+                
+        # Epps configurados para este GPIO
+        if self.config.has_section('epps'):
+            if self.config.has_option('epps', 'numero-de-epps'):
+                n = self.config.getint('epps', 'numero-de-epps')
+                for i in range(1, n+1):
+                    self.epps.append(self.config.getint('epps', f'epp-{i}'))
+
+        # Configuración de la camara
+        if self.config.has_section('camara'):
+            self.tiene_camara = True
+            if self.config.has_option('camara', 'dispositivo'):
+                dato = self.config.get('camara', 'dispositivo').lower()
+                if (dato == 'picamera') or (dato == 'usbcamera'):
+                    self.camara = dato
+                    self.camara_valida = True
+
+            if self.config.has_option('camara', 'numero-camara'):
+                self.numero_camara = self.config.getint('camara', 'numero-camara')
+
+            if self.config.has_option('camara', 'ancho-imagen'):
+                self.ancho_imagen = self.config.getint('camara', 'ancho-imagen')
+
+            if self.config.has_option('camara', 'alto-imagen'):
+                self.alto_imagen = self.config.getint('camara', 'alto-imagen')
+                
+            
     def pin(self, nombre: str) -> int:
         if nombre.lower() in ['rojo', 'verde', 'azul', 'zumbador']:
             return self.leds[nombre]
@@ -176,6 +238,15 @@ class DispositivoAlarma:
         if self.estado != "NO CONFIGURACION":
             for _, pin in self.configuracion.leds.items():
                 self.arduino.digitalWrite(pin, LOW)
+            self.estado = "APAGADA"
+
+    def alerta_azul(self) -> None:
+        if self.estado != "NO CONFIGURACION":
+            self.apagar()
+
+            # Ahora encendemos el azul
+            azul = self.configuracion.pin("azul")
+            self.arduino.digitalWrite(azul, HIGH)
             self.estado = "APAGADA"
 
     def alerta_verde(self):
