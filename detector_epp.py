@@ -6,7 +6,7 @@
 # Proyecto: PreventLink
 # -------------------------------------------------------
 
-from utils import Configuracion, Maquina, DispositivoAlarma
+from utils import Configuracion, Maquina, DispositivoAlarma, Argumentos
 from ultralytics import YOLO
 from enum import Enum
 
@@ -40,21 +40,28 @@ class Estado(Enum):
 # Constantes: Los diversos tipos de EPPs para este modelo
 # -------------------------------------------------------
 
+# Para el Deteksi PPE, estos son los numeros
+# nc: 7
+# names: ['glove', 'goggle', 'helmet', 'mask', 'person', 'shoe', 'vest']
 class EPP(Enum):
     NOTHING = -1
-    HELMET = 0
-    SHIELD = 1
-    JACKET = 2
-    DUST_MASK = 3
-    EYE_WEAR = 4
-    GLOVE = 5
-    BOOTS = 6
+    GLOVE=0
+    GOGGLE=1
+    HELMET=2
+    MASK=3
+    NO_GLOVE=4
+    NO_HARD_HAT=5
+    NO_MASK=6
+    NO_VEST=7
+    PERSON=8
+    SHOE=9
+    VEST=10
 
     def nombre(self) -> str:
         """
         Permite obtener el nombre del EPP
         """
-        diccionario = {0: 'Protective Helmet', 1: 'Shield', 2: 'Jacket', 3: 'Dust Mask', 4: 'Eye Wear', 5: 'Glove', 6: 'Protective Boots'}
+        diccionario = {0: 'glove', 1: 'goggle', 2: 'helmet', 3: 'mask', 4: 'no_glove', 5: 'no_hard_hat', 6: 'no_mask', 7: 'no_vest', 8: 'person', 9: 'shoe', 10: 'vest'}
         if self.value >= 0:
             return diccionario[self.value]
         
@@ -95,7 +102,7 @@ class Camara:
     def camara_pi(self) -> bool:
         return self.es_valida() and self.configuracion.camara == 'picamera'
 
-    def tomar_foto(self) -> str:
+    def tomar_foto(self, archivo_salida: str = None) -> str:
         """
         Toma una foto y la guarda en un archivo de acuerdo a la configuracion establecida
         Retorna el nombre del archivo donde se almacenó el archivo
@@ -103,20 +110,33 @@ class Camara:
         if not self.es_valida():
             return None
         
-        n = 0
-        if self.configuracion.guardar_imagenes:
-            n = int(time.time()*100)
-        nombre_archivo = f'{self.configuracion.carpeta_imagenes}/{self.configuracion.prefijo_imagenes}-{n}.jpg'
+        if archivo_salida is None:            
+            n = 0
+            if self.configuracion.guardar_imagenes:
+                n = int(time.time()*100)
+            nombre_archivo = f'{self.configuracion.carpeta_imagenes}/{self.configuracion.prefijo_imagenes}-{n}.jpg'
+        else:
+            nombre_archivo = archivo_salida
 
         if self.camara_usb():
             resultado, imagen = self.camara.read()
             if resultado:
+                if not (self.configuracion.rotacion_camara is None):
+                    # Vamos a rotar la imagen antes de guardarla
+                    imagen = cv2.rotate(imagen, self.configuracion.rotacion_camara)
                 cv2.imwrite(nombre_archivo, imagen)
                 return nombre_archivo
             else:
                 return None
-        else:
+        else:            
             self.camara.capture_file(nombre_archivo)
+            if not self.configuracion.rotacion_camara is None:
+                # Leemos el archivo
+                img = cv2.imread(nombre_archivo)
+                # Rotamos la imagen
+                img_rot = cv2.rotate(img, self.configuracion.rotacion_camara)
+                # Guardamos la imagen
+                cv2.imwrite(nombre_archivo, img_rot)
             return nombre_archivo
         
     
@@ -193,6 +213,21 @@ class DetectorEPPs:
         # Retornar la respuesta
         self.tiempo_ultima_deteccion = time.time()
         return respuesta
+    
+
+    def tomar_foto_y_detectar_epps(self) -> list[EPP]:
+        """
+        Operación de utilidad y depuración para probar el módulo de 
+        cámara y el detector de EPPS
+        """
+        print('Tomando foto')
+        imagen = self.tomar_foto()
+        print(f'Foto {imagen}')
+        if not (imagen is None):
+            print('Detectando')
+            epps_detectados = self.detectar_epp(imagen)
+            if not (epps_detectados is None):
+                print(f'EPPs detectado = {epps_detectados}')
         
 
     def es_valido(self) -> bool:
@@ -227,20 +262,29 @@ class DetectorEPPs:
         if not (self.dispositivo_alarma is None):
             self.dispositivo_alarma.alerta_azul()
 
+
     def alarma_ok(self) -> None:
         if not (self.dispositivo_alarma is None):
             self.dispositivo_alarma.alerta_verde()
 
+
     def alarma_advertencia(self) -> None:
         if not (self.dispositivo_alarma is None):
-            self.dispositivo_alarma.alerta_naranja()
+            self.dispositivo_alarma.alerta_naranja(alarma_sonora=self.configuracion.emitir_sonido_alarma)
+
 
     def alarma_error(self) -> None:
         if not (self.dispositivo_alarma is None):
-            self.dispositivo_alarma.alerta_roja(alarma_sonora=True)
+            self.dispositivo_alarma.alerta_roja(alarma_sonora=self.configuracion.emitir_sonido_error)
 
-    def han_pasado_quince_segundos(self) -> bool:
-        return time.time() - self.tiempo >= 15.0
+
+    def ha_superado_el_tiempo(self) -> bool:
+        if self.estado == Estado.ALARMA:
+            return time.time() - self.tiempo >= self.configuracion.tiempo_alarma
+        elif self.estado == Estado.ERROR:
+            return time.time() - self.tiempo >= self.configuracion.tiempo_error
+        else:
+            return False
     
 
     def maquina_apagada(self) -> bool:
@@ -248,6 +292,7 @@ class DetectorEPPs:
             return None
         return self.maquina.estado == "APAGADA"
     
+
     def maquina_encendida(self) -> bool:
         if self.maquina is None:
             return None
@@ -259,6 +304,7 @@ class DetectorEPPs:
             return None
         return self.dispositivo_alarma.estado == "APAGADA"
     
+
     def alarma_esta_ok(self) -> bool:
         if self.dispositivo_alarma is None:
             return None
@@ -276,6 +322,13 @@ class DetectorEPPs:
         self.apagar_alarma()
         self.apagar_maquina()
         self.estado = Estado.INICIAL
+
+        print("EPPs Configurados")
+        for n in self.epps_configurados:
+            print(f'{n}: {EPP.nombre(n)}')
+
+        print("Nombres:")
+        print(self.modelo.names)
 
         # Ahora viene todo el diagrama de flujo
         while True:
@@ -317,7 +370,7 @@ class DetectorEPPs:
                             self.encender_maquina()
                             self.alarma_ok()
                         else:
-                            if self.han_pasado_quince_segundos():
+                            if self.ha_superado_el_tiempo():
                                 self.estado = Estado.ERROR
                                 self.tiempo = time.time()
                                 self.alarma_error()
@@ -331,7 +384,7 @@ class DetectorEPPs:
                             self.encender_maquina()
                             self.alarma_ok()
                         else:
-                            if self.han_pasado_quince_segundos():
+                            if self.ha_superado_el_tiempo():
                                 print("Apagando máquina!")
                                 self.estado = Estado.INICIAL
                                 self.tiempo = time.time()
@@ -343,7 +396,15 @@ class DetectorEPPs:
 
 
 if __name__ == '__main__':
-    conf = Configuracion()
-    detector = DetectorEPPs(configuracion=conf)
-    detector.proceso()
+    args = Argumentos()
+    print(args.argumentos)
+    conf = Configuracion(archivo_configuracion=args.archivo_configuracion())
+    if args.tomar_foto():
+        camara = Camara(configuracion=conf)
+        camara.tomar_foto(archivo_salida=args.archivo_salida_foto())
+        print("OK")
+    elif args.detectar_epps():
+        print(DetectorEPPs(conf).tomar_foto_y_detectar_epps())
+    # detector = DetectorEPPs(configuracion=conf)
+    # detector.proceso()
         

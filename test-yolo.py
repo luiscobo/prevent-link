@@ -12,6 +12,7 @@ if __name__ == '__main__':
     if not (conf.modelo is None):
         model = YOLO(conf.modelo)
 
-        results = model.predict(source='./imagenes/foto-epp-01.jpg', save=False, conf=0.5)
+        results = model.predict(source='./imagenes/foto-casco01.jpg', save=True, conf=0.5)
         for result in results:
             print(result.boxes)
+

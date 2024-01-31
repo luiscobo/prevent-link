@@ -8,6 +8,8 @@
 
 import configparser
 from Arduino import Arduino
+import cv2
+import argparse
 import time
 
 # -------------------------------------------------------
@@ -44,6 +46,11 @@ class Configuracion:
         self.ancho_imagen: int = 640
         self.alto_imagen: int = 480
         self.numero_camara: int = 0
+        self.rotacion_camara: int = None
+        self.tiempo_alarma: float = 15
+        self.tiempo_error: float = 15
+        self.emitir_sonido_alarma: bool = False
+        self.emitir_sonido_error: bool = False
 
         # Datos para el predictor
         self.modelo = None
@@ -84,13 +91,23 @@ class Configuracion:
             puerto = self.config.get('conexion', 'puerto-alarma')
             if puerto is None or puerto.upper() == 'NO':
                 self.tiene_alarmas = False
-            else:
-                self.tiene_alarmas = True
+            else:                
                 self.puerto_arduino_alarmas = puerto
-                self.leds['rojo'] = int(self.config.getint('alarma', 'pin-rojo'))
-                self.leds['verde'] = int(self.config.getint('alarma', 'pin-verde'))
-                self.leds['azul'] = int(self.config.getint('alarma', 'pin-azul'))
-                self.leds['zumbador'] = int(self.config.getint('alarma', 'pin-zumbador'))
+                if self.config.has_section('alarma'):
+                    self.tiene_alarmas = True
+                    self.leds['rojo'] = int(self.config.getint('alarma', 'pin-rojo'))
+                    self.leds['verde'] = int(self.config.getint('alarma', 'pin-verde'))
+                    self.leds['azul'] = int(self.config.getint('alarma', 'pin-azul'))
+                    self.leds['zumbador'] = int(self.config.getint('alarma', 'pin-zumbador'))
+                    if self.config.has_option('alarma', 'tiempo-alarma'):
+                        self.tiempo_alarma = self.config.getfloat('alarma', 'tiempo-alarma')
+                    if self.config.has_option('alarma', 'tiempo-error'):
+                        self.tiempo_alarma = self.config.getfloat('alarma', 'tiempo-alarma')
+                    if self.config.has_option('alarma', 'emitir-sonido-alarma'):
+                        self.emitir_sonido_alarma = self.config.get('alarma', 'emitir-sonido-alarma').tolower() == "SI"
+                    if self.config.has_option('alarma', 'emitir-sonido-error'):
+                        self.emitir_sonido_alarma = self.config.get('alarma', 'emitir-sonido-error').tolower() == "SI"
+                    
 
         # Trabajo con el modelo de YOLO
         if self.config.has_section('detector'):
@@ -130,6 +147,18 @@ class Configuracion:
 
             if self.config.has_option('camara', 'alto-imagen'):
                 self.alto_imagen = self.config.getint('camara', 'alto-imagen')
+
+            if self.config.has_option('camara', 'rotacion'):
+                dato = self.config.get('camara', 'rotacion').lower()
+                if dato == 'no':
+                    self.rotacion_camara = None
+                elif dato == 'voltear':
+                    self.rotacion_camara = cv2.ROTATE_180
+                elif dato == 'izquierda':
+                    self.rotacion_camara = cv2.ROTATE_90_COUNTERCLOCKWISE
+                elif dato == 'derecha':
+                    self.rotacion_camara = cv2.ROTATE_90_CLOCKWISE
+
                 
             
     def pin(self, nombre: str) -> int:
@@ -319,4 +348,49 @@ class DispositivoAlarma:
         return "NO PUERTO!"
 
 # -------------------------------------------------------------------------------------------------
-            
+
+# -------------------------------------------------------
+# Clase para obtener los elementos de los argumentos en
+# la línea de comandos.
+# -------------------------------------------------------
+
+class Argumentos:
+
+    def __init__(self) -> None:
+        # Objeto para parsear los argumentos
+        parser = argparse.ArgumentParser()
+
+        # Configurar las opciones de la linea de comando
+        parser.add_argument('--configuracion', required=False,
+                            help='Ruta al archivo de configuración de la aplicación',
+                            default='./preventlink.ini')
+        
+        parser.add_argument('--tomar-foto', required=False,
+                            help='La aplicación solo tomará la foto y finalizará',
+                            action='store_true')
+        
+        parser.add_argument('--archivo-salida', required=False,
+                            help='Nombre del archivo donde se almacenará la foto tomada',
+                            default='./imagenes/foto.jpg')
+        
+        parser.add_argument('--detectar-epps', required=False,
+                            help='Permite tomar una foto y mostrar los EPPs detectados',
+                            action='store_true')
+        
+        # Obtener los valores de la línea de comandos
+        self.argumentos = parser.parse_args()
+
+    
+    def archivo_configuracion(self) -> str:
+        return self.argumentos.configuracion
+    
+    def archivo_salida_foto(self) -> str:
+        return self.argumentos.archivo_salida
+    
+    def tomar_foto(self) -> bool:
+        return self.argumentos.tomar_foto
+        
+    def detectar_epps(self) -> bool:
+        return self.argumentos.detectar_epps
+    
+
