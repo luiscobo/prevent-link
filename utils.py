@@ -52,6 +52,12 @@ class Configuracion:
         self.emitir_sonido_alarma: bool = False
         self.emitir_sonido_error: bool = False
 
+        # Datos para el lector de tags rfid
+        self.tiene_lector_rfids: bool = False
+        self.dir_ip_lector_rfids: str = '0.0.0.0'
+        self.potencia_transmision_lector_rfids = 81
+        self.tags: list[int] = []
+
         # Datos para el predictor
         self.modelo = None
         self.confianza_minima = 0.5
@@ -108,6 +114,14 @@ class Configuracion:
                     if self.config.has_option('alarma', 'emitir-sonido-error'):
                         self.emitir_sonido_alarma = self.config.get('alarma', 'emitir-sonido-error').tolower() == "SI"
                     
+            # Configuración del lector de rfids
+            if self.config.has_option('conexion', 'usar-rfid-tags'):
+                self.tiene_lector_rfids = self.config.get('conexion', 'usar-rfid-tags').lower() == 'si'
+                if self.tiene_lector_rfids:
+                    if self.config.has_option('conexion', 'lector-rfid-direccion-ip'):
+                        self.dir_ip_lector_rfids = self.config.get('conexion', 'lector-rfid-direccion-ip')
+                        if self.config.has_option('conexion', 'lector-rfid-potencia-transmision'):
+                            self.potencia_transmision_lector_rfids = self.config.getint('conexion', 'lector-rfid-potencia-transmision')
 
         # Trabajo con el modelo de YOLO
         if self.config.has_section('detector'):
@@ -129,6 +143,14 @@ class Configuracion:
                 n = self.config.getint('epps', 'numero-de-epps')
                 for i in range(1, n+1):
                     self.epps.append(self.config.getint('epps', f'epp-{i}'))
+
+        # Tags configurados para este GPIO
+        if self.tiene_lector_rfids:
+            if self.config.has_section('tags'):
+                if self.config.has_option('tags', 'numero-de-tags'):
+                    n = self.config.getint('tags', 'numero-de-tags')
+                    for i in range(1, n+1):
+                        self.tags.append(self.config.getint('tags', f'tag={i}'))
 
         # Configuración de la camara
         if self.config.has_section('camara'):
